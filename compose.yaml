@@ -1,9 +1,44 @@
 services:
   mongodb:
-    image: 'mongo:latest'
+    image: mongo:latest
     environment:
-      - 'MONGO_INITDB_DATABASE=mydatabase'
-      - 'MONGO_INITDB_ROOT_PASSWORD=secret'
-      - 'MONGO_INITDB_ROOT_USERNAME=root'
+      MONGO_INITDB_DATABASE: mydatabase
     ports:
-      - '27017'
+      - "27017:27017"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mongosh",
+          "--quiet",
+          "--username",
+          "root",
+          "--password",
+          "secret",
+          "--authenticationDatabase",
+          "admin",
+          "--eval",
+          "db.adminCommand('ping')"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    env_file:
+      - .env-database
+  api:
+    build:
+      context: .
+      args:
+        BUILD_DATE: ${BUILD_DATE}
+    container_name: devops_app
+    image: devops_app:${APP_VERSION}
+    ports:
+      - "8080:8080"
+    environment:
+      MONGODB_URI: "mongodb://root:secret@mongodb:27017/mydatabase?authSource=admin"
+      DOCKER_COMPOSE_ENABLED: "false"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    env_file:
+      - .env-database
