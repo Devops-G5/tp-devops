@@ -99,7 +99,7 @@ class TaskCrudTests {
         mvc.perform(put("/api/tasks/{id}", task.getId()).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Configurar Docker\",\"status\":\"done\"}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.name").value("Configurar Docker"))
-                .andExpect(jsonPath("$.status").value("done"));
+                .andExpect(jsonPath("$.status").value("Test para validar pipeline (rompemo' todo)"));
     }
 
     @Test
