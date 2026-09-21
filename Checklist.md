@@ -16,7 +16,7 @@
 
 - [x] Historial de commits siguiendo **Conventional Commits** (`feat:`, `fix:`, `docs:`, `ci:`, etc.)
 - [x] Rama principal (`main`/`master`) protegida — sin pushes directos
-- [] Todos los cambios integrados vía **Pull Requests**, documentados con:
+- [ ] Todos los cambios integrados vía **Pull Requests**, documentados con:
   - [ ] Descripción del cambio
   - [ ] Evidencia de pruebas ejecutadas
 - [ ] Estrategia de versionado/etiquetado definida (elegir una):
