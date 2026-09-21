@@ -127,6 +127,13 @@
 							</annotationProcessorPaths>
 						</configuration>
 					</execution>
+				</executions>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-checkstyle-plugin</artifactId>
+				<version>3.6.0</version>
+				<executions>
 					<execution>
 						<id>validate-code-style</id>
 						<phase>verify</phase>
@@ -135,12 +142,6 @@
 						</goals>
 					</execution>
 				</executions>
-			</plugin>
-			<plugin>
-				<groupId>org.apache.maven.plugins</groupId>
-				<artifactId>maven-checkstyle-plugin</artifactId>
-				<version>3.6.0</version>
-
 				<!-- Versión moderna compatible con Java 25 -->
 				<dependencies>
 					<dependency>
