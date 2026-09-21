@@ -33,9 +33,6 @@ services:
     image: devops_app:${APP_VERSION}
     ports:
       - "8080:8080"
-    environment:
-      MONGODB_URI: "mongodb://root:secret@mongodb:27017/mydatabase?authSource=admin"
-      DOCKER_COMPOSE_ENABLED: "false"
     depends_on:
       mongodb:
         condition: service_healthy
