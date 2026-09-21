@@ -1,20 +1,19 @@
 services:
   mongodb:
-    image: mongo:latest
+    image: mongo:8.3.11
     environment:
       MONGO_INITDB_DATABASE: mydatabase
     ports:
       - "27017:27017"
     healthcheck:
-      test:
-        [
+      test: [
           "CMD",
           "mongosh",
           "--quiet",
           "--username",
-          "root",
+          "${MONGO_INITDB_ROOT_USERNAME}",
           "--password",
-          "secret",
+          "${MONGO_INITDB_ROOT_PASSWORD}",
           "--authenticationDatabase",
           "admin",
           "--eval",
@@ -34,9 +33,6 @@ services:
     image: devops_app:${APP_VERSION}
     ports:
       - "8080:8080"
-    environment:
-      MONGODB_URI: "mongodb://root:secret@mongodb:27017/mydatabase?authSource=admin"
-      DOCKER_COMPOSE_ENABLED: "false"
     depends_on:
       mongodb:
         condition: service_healthy
