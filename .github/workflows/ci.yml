@@ -15,25 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lint:
-    name: Checkstyle
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Configure Java
-        uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: "25"
-          cache: maven
-          cache-read-only: ${{ github.event_name == 'pull_request' }}
-
-      - name: Run Checkstyle
-        run: ./mvnw --batch-mode --no-transfer-progress checkstyle:check
+  
 
   build-and-test:
     name: Maven verify (Java 25)
@@ -51,7 +33,7 @@ jobs:
           java-version: '25'
           cache: maven
           cache-read-only: ${{ github.event_name == 'pull_request' }}
-
-      - name: Compile and test
+      - name: Compile, lint and test
         run: ./mvnw --batch-mode --no-transfer-progress verify
+
       

@@ -127,6 +127,13 @@
 							</annotationProcessorPaths>
 						</configuration>
 					</execution>
+					<execution>
+						<id>validate-code-style</id>
+						<phase>verify</phase>
+						<goals>
+							<goal>check</goal>
+						</goals>
+					</execution>
 				</executions>
 			</plugin>
 			<plugin>
