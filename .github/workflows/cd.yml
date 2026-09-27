@@ -1,0 +1,147 @@
+name: CD
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+env:
+  REGISTRY: docker.io
+  USER_DOCKERHUB: nzarat2
+  IMAGE_NAME: devops_app
+  DEV_BRANCH: develop
+
+jobs:
+  resolve:
+    name: Resolve deployment
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    outputs:
+      eligible: ${{ steps.ref.outputs.eligible }}
+      ref_type: ${{ steps.ref.outputs.ref_type }}
+      source_tag: ${{ steps.ref.outputs.source_tag }}
+      environment: ${{ steps.ref.outputs.environment }}
+
+    steps:
+      - name: Checkout tested commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Resolve branch or SemVer tag
+        id: ref
+        shell: bash
+        env:
+          SOURCE_REF: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          echo "eligible=false" >> "$GITHUB_OUTPUT"
+
+          if [[ "$SOURCE_REF" == "$DEV_BRANCH" ]]; then
+            echo "eligible=true" >> "$GITHUB_OUTPUT"
+            echo "ref_type=branch" >> "$GITHUB_OUTPUT"
+            echo "source_tag=" >> "$GITHUB_OUTPUT"
+            echo "environment=development" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          RELEASE_TAG=""
+
+          if [[ "$SOURCE_REF" =~ ^v(0|[1-9][0-9])\.(0|[1-9][0-9])\.(0|[1-9][0-9]*)$ ]]; then
+            RELEASE_TAG="$SOURCE_REF"
+          else
+            while IFS= read -r candidate; do
+              if [[ "$candidate" =~ ^v(0|[1-9][0-9])\.(0|[1-9][0-9])\.(0|[1-9][0-9]*)$ ]]; then
+                RELEASE_TAG="$candidate"
+                break
+              fi
+            done < <(git tag --points-at "$HEAD_SHA")
+          fi
+
+          if [[ -n "$RELEASE_TAG" ]]; then
+            echo "eligible=true" >> "$GITHUB_OUTPUT"
+            echo "ref_type=tag" >> "$GITHUB_OUTPUT"
+            echo "source_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+            echo "environment=production" >> "$GITHUB_OUTPUT"
+          fi
+
+  deliver:
+    name: Publish and deploy
+    needs: resolve
+    if: needs.resolve.outputs.eligible == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    environment:
+      name: ${{ needs.resolve.outputs.environment }}
+
+    concurrency:
+      group: deploy-${{ needs.resolve.outputs.environment }}
+      cancel-in-progress: false
+
+    permissions:
+      actions: read
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout tested commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Download tested JAR
+        uses: actions/download-artifact@v8
+        with:
+          name: application-jar
+          path: target
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image name
+        id: image
+        shell: bash
+        run: |
+          IMAGE="${REGISTRY}/${USER_DOCKERHUB,,}/${IMAGE_NAME,,}"
+          echo "name=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Generate Docker tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.image.outputs.name }}
+          flavor: |
+            latest=auto
+          tags: |
+            type=raw,value=dev,enable=${{ needs.resolve.outputs.ref_type == 'branch' }}
+            type=semver,pattern={{version}},value=${{ needs.resolve.outputs.source_tag }},enable=${{ needs.resolve.outputs.ref_type == 'tag' }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Configure Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          sbom: true
+

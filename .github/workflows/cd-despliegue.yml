@@ -1,0 +1,233 @@
+name: CD
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ci-cd
+  DEV_BRANCH: develop
+
+jobs:
+  resolve:
+    name: Resolve deployment
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    outputs:
+      eligible: ${{ steps.ref.outputs.eligible }}
+      ref_type: ${{ steps.ref.outputs.ref_type }}
+      source_tag: ${{ steps.ref.outputs.source_tag }}
+      environment: ${{ steps.ref.outputs.environment }}
+
+    steps:
+      - name: Checkout tested commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Resolve branch or SemVer tag
+        id: ref
+        shell: bash
+        env:
+          SOURCE_REF: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          echo "eligible=false" >> "$GITHUB_OUTPUT"
+
+          if [[ "$SOURCE_REF" == "$DEV_BRANCH" ]]; then
+            echo "eligible=true" >> "$GITHUB_OUTPUT"
+            echo "ref_type=branch" >> "$GITHUB_OUTPUT"
+            echo "source_tag=" >> "$GITHUB_OUTPUT"
+            echo "environment=development" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          RELEASE_TAG=""
+
+          if [[ "$SOURCE_REF" =~ ^v(0|[1-9][0-9])\.(0|[1-9][0-9])\.(0|[1-9][0-9]*)$ ]]; then
+            RELEASE_TAG="$SOURCE_REF"
+          else
+            while IFS= read -r candidate; do
+              if [[ "$candidate" =~ ^v(0|[1-9][0-9])\.(0|[1-9][0-9])\.(0|[1-9][0-9]*)$ ]]; then
+                RELEASE_TAG="$candidate"
+                break
+              fi
+            done < <(git tag --points-at "$HEAD_SHA")
+          fi
+
+          if [[ -n "$RELEASE_TAG" ]]; then
+            echo "eligible=true" >> "$GITHUB_OUTPUT"
+            echo "ref_type=tag" >> "$GITHUB_OUTPUT"
+            echo "source_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+            echo "environment=production" >> "$GITHUB_OUTPUT"
+          fi
+
+  deliver:
+    name: Publish and deploy
+    needs: resolve
+    if: needs.resolve.outputs.eligible == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    environment:
+      name: ${{ needs.resolve.outputs.environment }}
+
+    concurrency:
+      group: deploy-${{ needs.resolve.outputs.environment }}
+      cancel-in-progress: false
+
+    permissions:
+      actions: read
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout tested commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Download tested JAR
+        uses: actions/download-artifact@v8
+        with:
+          name: application-jar
+          path: target
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image name
+        id: image
+        shell: bash
+        run: |
+          IMAGE="${REGISTRY}/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_NAME,,}"
+          echo "name=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Generate Docker tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.image.outputs.name }}
+          flavor: |
+            latest=auto
+          tags: |
+            type=raw,value=dev,enable=${{ needs.resolve.outputs.ref_type == 'branch' }}
+            type=semver,pattern={{version}},value=${{ needs.resolve.outputs.source_tag }},enable=${{ needs.resolve.outputs.ref_type == 'tag' }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Configure Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          sbom: true
+
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 0700 -d ~/.ssh
+
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 0600 ~/.ssh/id_ed25519
+
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 0644 ~/.ssh/known_hosts
+
+      - name: Prepare deployment variables
+        env:
+          APP_IMAGE: ${{ steps.image.outputs.name }}
+          APP_TAG: ${{ steps.meta.outputs.version }}
+        run: |
+          printf 'APP_IMAGE=%s\nAPP_TAG=%s\n' \
+            "$APP_IMAGE" \
+            "$APP_TAG" \
+            > deployment.env
+
+      - name: Prepare remote directory
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+        run: |
+          TARGET="${SSH_USER}@${SSH_HOST}"
+
+          ssh -i ~/.ssh/id_ed25519 "$TARGET" \
+            'mkdir -p ~/app'
+
+      - name: Copy deployment files
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+        run: |
+          TARGET="${SSH_USER}@${SSH_HOST}"
+
+          rsync -az \
+            -e "ssh -i ~/.ssh/id_ed25519" \
+            ./docker-compose.yml \
+            "$TARGET:~/app/docker-compose.yml"
+
+          rsync -az \
+            -e "ssh -i ~/.ssh/id_ed25519" \
+            ./deployment.env \
+            "$TARGET:~/app/deployment.env"
+
+      - name: Log remote server in to GHCR
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          GHCR_PULL_USERNAME: ${{ secrets.GHCR_PULL_USERNAME }}
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+        run: |
+          TARGET="${SSH_USER}@${SSH_HOST}"
+
+          printf '%s' "$GHCR_PULL_TOKEN" |
+            ssh -i ~/.ssh/id_ed25519 "$TARGET" \
+              "sudo docker login ghcr.io --username '$GHCR_PULL_USERNAME' --password-stdin"
+
+      - name: Deploy stack
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+        run: |
+          TARGET="${SSH_USER}@${SSH_HOST}"
+
+          ssh -i ~/.ssh/id_ed25519 "$TARGET" '
+            set -eu
+
+            trap "sudo docker logout ghcr.io >/dev/null 2>&1 || true" EXIT
+
+            cd ~/app
+
+            sudo docker compose \
+              --env-file deployment.env \
+              pull
+
+            sudo docker compose \
+              --env-file deployment.env \
+              up -d --remove-orphans
+
+            sudo docker image prune -f
+          '
