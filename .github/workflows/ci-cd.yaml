@@ -48,7 +48,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/devops_app
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ vars.IMAGE_NAME }}
           tags: |
             type=ref,event=tag
 
