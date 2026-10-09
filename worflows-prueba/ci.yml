@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+ #TO-DO: Ver si es necesario para push
+  pull_request:
+    branches: [ main, develop ]
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Maven verify (Java 25)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Configure Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+          cache: maven
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+      - name: Compile, lint and test
+        run: ./mvnw --batch-mode --no-transfer-progress verify
+        
+      - name: Upload application JAR
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: application-jar
+          path: target/*.jar
+          if-no-files-found: error
+          retention-days: 7

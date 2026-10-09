@@ -6,7 +6,24 @@ El dominio no depende de MongoDB; `TaskDocument` representa la colección `tasks
 
 ## Ejecutar
 
-Requisitos: JDK 25 y Docker con Docker Compose.
+### Con Docker Compose
+
+Requisitos: Docker y Docker Compose.
+
+Para levantar el proyecto, desde la carpeta raíz:
+
+```sh
+docker compose up --build
+```
+Para bajar los contenedores y volumenes:
+
+```sh
+docker compose down -v
+```
+
+### De forma local
+Requisitos: JDK 25 y Docker con Docker Compose(para levantar la base).
+
 
 ```sh
 ./mvnw spring-boot:run
