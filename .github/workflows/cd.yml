@@ -7,12 +7,6 @@ on:
     types:
       - completed
 
-env:
-  REGISTRY: docker.io
-  USER_DOCKERHUB: nzarat2
-  IMAGE_NAME: devops_app
-  DEV_BRANCH: develop
-
 jobs:
   resolve:
     name: Resolve deployment
@@ -111,7 +105,7 @@ jobs:
         id: image
         shell: bash
         run: |
-          IMAGE="${REGISTRY}/${USER_DOCKERHUB,,}/${IMAGE_NAME,,}"
+          IMAGE="${{ vars.REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ vars.IMAGE_NAME }}"
           echo "name=$IMAGE" >> "$GITHUB_OUTPUT"
 
       - name: Generate Docker tags
