@@ -38,3 +38,5 @@ services:
         condition: service_healthy
     env_file:
       - .env-database
+    environment:
+          - APP_VERSION=${APP_VERSION}
