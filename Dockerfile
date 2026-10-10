@@ -25,7 +25,7 @@ RUN mvn clean package -DskipTests
 
 FROM eclipse-temurin:${TAG_VERSION} AS prd
 
-ARG APP_VERSION=1.0.0
+ARG APP_VERSION
 ARG BUILD_DATE
 
 LABEL org.opencontainers.image.created=$BUILD_DATE \
