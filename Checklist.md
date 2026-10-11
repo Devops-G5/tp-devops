@@ -8,7 +8,7 @@
 
 - [x] API REST desarrollada (lenguaje/framework a elección)
 - [x] Suite de pruebas unitarias básicas implementada
-- [ ] Documentación interactiva de la API expuesta y accesible (Swagger / OpenAPI o equivalente nativo del framework) — **requisito obligatorio de validación**
+- [x] Documentación interactiva de la API expuesta y accesible (Swagger / OpenAPI o equivalente nativo del framework) — **requisito obligatorio de validación**
 
 ---
 
@@ -16,13 +16,12 @@
 
 - [x] Historial de commits siguiendo **Conventional Commits** (`feat:`, `fix:`, `docs:`, `ci:`, etc.)
 - [x] Rama principal (`main`/`master`) protegida — sin pushes directos
-- [ ] Todos los cambios integrados vía **Pull Requests**, documentados con:
-  - [ ] Descripción del cambio
-  - [ ] Evidencia de pruebas ejecutadas
-- [ ] Estrategia de versionado/etiquetado definida (elegir una):
-  - [ ] Semantic Versioning (SemVer) — `MAJOR.MINOR.PATCH` (ej. `v1.0.0`)
-  - [ ] Commit SHA / Git Hash (ej. `sha-a1b2c3d`)
-  - [ ] Timestamp / Build Number (ej. `2026.08.29-build.42`)
+- [x] Todos los cambios integrados vía **Pull Requests**, documentados con:
+  - [x] Descripción del cambio
+  - [x] Evidencia de pruebas ejecutadas
+- [x] Estrategia de versionado/etiquetado definida (elegir una):
+  - Semantic Versioning (SemVer) — `MAJOR.MINOR.PATCH` (ej. `v1.0.0`)
+
 
 ---
 
@@ -44,9 +43,9 @@
 - [x] Etapa de tests unitarios automatizada (Andon Cord: si falla, el PR no se integra)
 
 **Publicación de Artefactos**
-- [ ] Build de imagen Docker automatizado en el pipeline
-- [ ] Publicación automática a Docker Hub
-- [ ] Imagen etiquetada automáticamente con la versión SemVer de la release
+- [x] Build de imagen Docker automatizado en el pipeline
+- [x] Publicación automática a Docker Hub
+- [x] Imagen etiquetada automáticamente con la versión SemVer de la release
 
 **Despliegue Continuo (CD) — opcional/adicional**
 - [ ] Despliegue automático configurado (ej. Render u otra plataforma gratuita)
