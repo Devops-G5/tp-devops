@@ -13,7 +13,7 @@ Requisitos: Docker y Docker Compose.
 Para levantar el proyecto, desde la carpeta raíz:
 
 ```sh
-$ BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') APP_VERSION=1.0.0 docker compose up --build         
+$ BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') docker compose up --build  --no-attach mongodb       
 ```
 Para bajar los contenedores y volumenes:
 

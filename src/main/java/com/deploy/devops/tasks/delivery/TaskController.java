@@ -30,7 +30,9 @@ public class TaskController {
     }
 
     @GetMapping
-    public List<Task> getAll() { return service.getAll(); }
+    public List<Task> getAll() { 
+        return service.getAll(); 
+    }
 
     @GetMapping("/{id}")
     public Task get(@PathVariable String id) { return service.get(id); }
