@@ -1,0 +1,69 @@
+prometheus.scrape "devops_api" {
+  targets = [
+    {"__address__" = "api:8080"},
+  ]
+
+  job_name        = "devops-api"
+  metrics_path    = "/actuator/prometheus"
+  scrape_interval = "15s"
+
+  forward_to = [
+    prometheus.remote_write.metrics_hosted_prometheus.receiver,
+  ]
+}
+
+prometheus.remote_write "metrics_hosted_prometheus" {
+  endpoint {
+    name = "hosted-prometheus"
+    url  = "https://prometheus-prod-40-prod-sa-east-1.grafana.net/api/prom/push"
+
+    basic_auth {
+      username = "3652179"
+      password = sys.env("GRAFANA_CLOUD_TOKEN")
+    }
+  }
+}
+
+discovery.docker "devops_logs" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "15s"
+
+  filter {
+    name   = "name"
+    values = ["devops_app"]
+  }
+}
+
+loki.source.docker "devops_api" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.docker.devops_logs.targets
+  forward_to = [loki.process.devops_api.receiver]
+
+  labels = {
+    "job"         = "devops-api",
+    "application" = "devops",
+  }
+}
+
+loki.process "devops_api" {
+  forward_to = [loki.write.grafanacloud.receiver]
+
+  stage.json {
+    expressions = {"level" = "level"}
+  }
+
+  stage.labels {
+    values = {"level" = ""}
+  }
+}
+
+loki.write "grafanacloud" {
+  endpoint {
+    url = "https://logs-prod-024.grafana.net/loki/api/v1/push"
+
+    basic_auth {
+      username = "1821754"
+      password = sys.env("GRAFANA_CLOUD_LOGS_TOKEN")
+    }
+  }
+}

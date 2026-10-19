@@ -40,3 +40,35 @@ services:
       - .env-database
     environment:
           - APP_VERSION=${APP_VERSION}
+          - SPRING_PROFILES_ACTIVE=dev
+  alloy:
+    image: grafana/alloy:v1.20.1
+    restart: unless-stopped
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    env_file:
+      - .env
+    volumes:
+      - ./observability/config.alloy:/etc/alloy/config.alloy:ro
+      - alloy-data:/var/lib/alloy/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "127.0.0.1:12345:12345"
+    depends_on:
+      - api
+  api-tester:
+    build:
+      context: ./api-tester
+    environment:
+      BASE_URL: http://api:8080
+      ITERATIONS: "3"
+      SLEEP_SECONDS: "2"
+      MAX_WAIT: "120" # Tiempo de espera antes de comenzar con las pruebas
+    depends_on:
+      - api
+    restart: unless-stopped
+volumes:
+  alloy-data:
