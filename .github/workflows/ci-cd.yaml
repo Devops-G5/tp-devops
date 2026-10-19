@@ -1,12 +1,10 @@
 name: CI-CD
 
 on:
-  push: # Para cambios en cualquier rama (!) no quiere decir que se suba la imagen a docker
-
-  pull_request: # Cuando hacemos un PR
-    branches:
-      - main
-      - develop
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
 
   workflow_dispatch:  #Habilita la ejecución manual para probarlo
   
