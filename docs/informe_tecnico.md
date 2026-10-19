@@ -29,8 +29,8 @@ flowchart LR
     C --> D[Compilación Maven<br/>Java 25 · Temurin]
     D --> E[Linter<br/>Checkstyle · Google checks]
     E --> F[Tests<br/>JUnit · mvnw verify]
-    F -->|solo rama main| G[Build de imagen Docker]
-    G --> H[(Docker Hub<br/>tag = SHA del commit)]
+    F -->|solo rama Main o tags| G[Build de imagen Docker]
+    G --> H[(Docker Hub<br/>tag = SHA del commit ó semVer del tag en github)]
     H --> I[Despliegue<br/>COMPLETAR: plataforma de hosting]
     I --> J[Monitoreo<br/>Actuator + Prometheus]
 
@@ -45,87 +45,20 @@ flowchart LR
 
 | Etapa | Herramienta | Función |
 |---|---|---|
-| Control de versiones | GitHub | Almacena el código y dispara el pipeline (push, PR a `main`/`develop`, ejecución manual) |
+| Control de versiones | GitHub | Almacena el código y dispara el pipeline (push ó PR a `main`/`develop`, ejecución manual y cuando se crea un tag) |
 | Build | Maven (`mvnw`) + Java 25 (Temurin) | Compila el proyecto Spring Boot 4.1.1 |
 | Linter | Checkstyle 14.1.0 (reglas `google_checks.xml`) | Verifica estilo; `failOnViolation=true` corta el build si hay violaciones |
 | Tests | JUnit / starters de test de Spring Boot | Valida el comportamiento de la aplicación (`mvn verify`) |
 | Runner de CI | GitHub Actions (`ubuntu-latest`) | Ejecuta las etapas del pipeline en un entorno efímero |
 | Construcción de imagen | Docker + `docker/build-push-action` | Genera la imagen del contenedor |
-| Registro de imágenes | Docker Hub | Almacena y versiona los artefactos (tag = SHA del commit) |
+| Registro de imágenes | Docker Hub | Almacena y versiona los artefactos (tag = SHA del commit ó semVer del tag en github) |
 | Hosting / Despliegue | [COMPLETAR: Render / Railway / Fly.io / VPS / otro] | Ejecuta la aplicación en producción |
 | Monitoreo | Spring Boot Actuator + Micrometer (Prometheus) + Grafana  | Expone métricas y salud de la API |
 
 
->Pipeline ejecutado (rama main)
-![Pipeline ejecutado en CI](./img/pipeline-ejecucion.png)
-
 ### 1.3 El workflow 'ci-cd'
 
-```yaml
-name: CI-CD
-
-on:
-  push: 
-
-  pull_request:
-    branches:
-      - main
-      - develop
-
-  workflow_dispatch:  
-  
-jobs:
-  build-and-test:
-    name: Maven verify (Java 25)
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Configure Java
-        uses: actions/setup-java@v6
-        with:
-          distribution: 'temurin'
-          java-version: '25'
-          cache: maven
-          cache-read-only: ${{ github.event_name == 'pull_request' }}
-      - name: Compile, lint and test
-        run: ./mvnw --batch-mode --no-transfer-progress verify
-        
-  push_to_docker_hub_registry:
-      name: Push Docker image to docker hub
-      runs-on: ubuntu-latest
-      needs: build-and-test
-      if: github.ref == 'refs/heads/main'
-
-      steps:
-        - name: Check out repo
-          uses: actions/checkout@v4
-        
-        - name: Log in to docker hub
-          uses: docker/login-action@v3
-          with:
-            username: ${{ secrets.DOCKERHUB_USERNAME }}
-            password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-        - name: Extract metadata (tags, labels) for Docker
-          id: meta
-          uses: docker/metadata-action@v5
-          with:
-            images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ vars.IMAGE_NAME }}
-
-        - name: Build and push Docker image
-          uses: docker/build-push-action@v5
-          with:
-            context: .
-            push: true
-            tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ vars.IMAGE_NAME }}:${{ github.sha }}
-            labels: ${{ steps.meta.outputs.labels }}
-            build-args: |
-              BUILD_DATE=${{ github.event.repository.updated_at }}
-              # APP_VERSION=${{ github.sha }}
-```
+Se puede consultar el archivo yaml con todos los pasos [acá](../.github/workflows/ci-cd.yaml)
 
 **Puntos clave del workflow:**
 
@@ -135,6 +68,47 @@ jobs:
 - Las credenciales de Docker Hub se guardan como **secrets** (`DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`), nunca en el código.
 - La imagen se etiqueta con el **SHA del commit**, lo que da trazabilidad exacta entre código y artefacto.
 - Se usa caché de Maven (`cache: maven`) para acelerar las ejecuciones (feedback más rápido).
+
+>Pipeline ejecutado (rama main)
+![Pipeline ejecutado en CI](./img/pipeline-ejecucion.png)
+
+---
+
+
+### 1.4 El workflow 'tagged'
+
+
+Se puede consultar el archivo yaml con todos los pasos [acá](../.github/workflows/tagged.yaml)
+
+Este workflow se encarga de **publicar versiones**: se dispara únicamente cuando se sube un tag con formato SemVer (por ejemplo `1.1.0`) y publica en Docker Hub una imagen con esa versión exacta.
+
+```bash
+git tag 1.1.0
+git push origin 1.1.0
+```
+
+**Puntos clave del workflow:**
+
+- `on.push.tags: '[0-9]+.[0-9]+.[0-9]+'` hace que el workflow solo se ejecute con tags en formato `X.Y.Z`. Cualquier otro tag (`hola`, `1.1`) ni siquiera lo dispara.
+- Antes de publicar vuelve a ejecutar `./mvnw verify` (compilación, Checkstyle y tests), y `needs: build-and-test` garantiza que **no se publica ninguna versión si falló el lint o un test**.
+- `docker/metadata-action` con `type=semver,pattern={{version}}` genera el tag de la imagen a partir del tag de Git: el tag `1.1.0` produce la imagen `usuario/imagen:1.1.0`.
+- `flavor: latest=false` evita el tag `latest`, de modo que cada versión es un tag **fijo e inmutable**, útil para despliegues y rollbacks.
+- El paso **Validar version** funciona como una segunda barrera (Andon Cord): si no se generó ningún tag de imagen o el nombre del tag no cumple `X.Y.Z`, el workflow falla con `exit 1` y los pasos siguientes (login, build y push) **no se ejecutan**.
+- La versión se pasa al Dockerfile mediante `APP_VERSION`, que queda registrada en la etiqueta `org.opencontainers.image.version` de la imagen, lo que da trazabilidad entre el código, el tag y el artefacto.
+- Las credenciales de Docker Hub se guardan como **secrets** (`DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`), nunca en el código.
+- `docker/setup-buildx-action` y `cache-from/cache-to: type=gha` reutilizan las capas de Docker entre ejecuciones, lo que acelera el build (feedback más rápido).
+
+> Pipeline ejecutado (tag SemVer)
+
+![Pipeline ejecutado al publicar un tag](./img/pipeline-tagged.png)
+
+**Diferencia con `ci-cd`:**
+
+| | `ci-cd` | `tagged` |
+|---|---|---|
+| Disparador | push y PR a `main` / `develop` | push de un tag `X.Y.Z` |
+| Tag de la imagen | SHA del commit | Versión SemVer (`1.1.0`) |
+| Uso | Integración continua y artefacto de cada cambio en `main` | Versiones liberadas e identificables |
 
 ---
 
