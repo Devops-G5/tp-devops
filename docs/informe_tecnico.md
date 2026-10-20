@@ -264,6 +264,7 @@ Configuración de protección de ramas sobre main y develop:
 
 ### 3.1 Primera Forma: Flujo y Consistencia
 
+
 #### ¿Qué tareas manuales quedaron 100% automatizadas?
 
 | Tarea manual (antes) | Automatización (ahora) |
@@ -275,13 +276,11 @@ Configuración de protección de ramas sobre main y develop:
 
 #### ¿Cómo se asegura que el entorno sea idéntico en desarrollo y CI/CD?
 
-- **Misma imagen, mismo Dockerfile:** el contenedor que se prueba en CI es el mismo artefacto que se despliega (*build once, run anywhere*).
-- **Versiones fijadas:** imagen base con tag explícito (ej. `python:3.12-slim`) y dependencias con versiones pinneadas (`requirements.txt` / lockfile).
-- **Docker Compose** para desarrollo local que replica el entorno del contenedor: [COMPLETAR: `docker-compose.yml`].
+- **Mismo Dockerfile y versiones fijadas:** la imagen se construye siempre con el mismo Dockerfile, con tags de imagen base explícitos (`maven:3.9-eclipse-temurin-25-alpine` y `eclipse-temurin:25-jre-alpine`).
+- **Java alineado en todos los entornos:** Java 25 (Temurin) en el `pom.xml` (`java.version`), en el runner de CI (`setup-java`) y en la imagen base; Spring Boot 4.1.1 y plugins con versión explícita.
+- **Docker Compose** para desarrollo local: la app usa `spring-boot-docker-compose`, que levanta los servicios (MongoDB) definidos en `compose.yaml` al iniciar.
 - **Configuración por variables de entorno** (12-Factor App): el código no cambia entre entornos, solo la configuración.
 - **Runner efímero:** cada ejecución de CI parte de un entorno limpio, sin estado residual.
-
-> **📷 Imagen sugerida:** captura del `docker-compose up` local junto al log del job de CI usando la misma imagen.
 
 ### 3.2 Segunda Forma: Feedback Rápido y Andon Cord
 
@@ -294,85 +293,51 @@ Configuración de protección de ramas sobre main y develop:
 | **Tests (JUnit)** | Al menos un test falla | Falla el job `build-and-test` y se bloquea el merge del PR |
 | **Dependencia entre jobs** | `needs: build-and-test` no se cumplió | El job de Docker Hub **no se ejecuta** |
 | **Build de imagen Docker** | Error de construcción | No se publica el artefacto |
-| **Protección de rama** | Checks requeridos en rojo | GitHub impide el merge a `main` [COMPLETAR: confirmar que está configurada] |
+| **Protección de rama** | Checks requeridos en rojo | GitHub impide el merge a `main` |
 
-**Principio:** un artefacto defectuoso nunca llega al registro ni a producción. El equipo recibe la notificación por [COMPLETAR: email / Slack / Discord / GitHub] y la prioridad es **arreglar el pipeline antes de seguir produciendo código nuevo**.
+**Principio:** un artefacto defectuoso nunca llega al registro ni a producción. El equipo recibe la notificación por email y la prioridad es **arreglar el pipeline antes de seguir produciendo código nuevo**.
 
-> **📷 Imagen sugerida:** captura de un pipeline en rojo con el paso que falló resaltado.
->
-> `![Pipeline detenido por fallo](img/andon-cord.png)`
+![Pipeline detenido por fallo](./img/test_fail.png)
 
 #### Visibilidad de fallos: errores HTTP 5xx y latencia alta
 
 | Aspecto | Detalle |
 |---|---|
-| **Herramienta de monitoreo** | Spring Boot Actuator + Micrometer, con métricas en formato Prometheus [COMPLETAR: Prometheus + Grafana u otra herramienta que consuma `/actuator/prometheus`] |
+| **Herramienta de monitoreo** | Spring Boot Actuator + Micrometer, con métricas en formato Prometheus + Grafana |
 | **Señal para 5xx** | **Métrica:** `http_server_requests_seconds_count{status=~"5.."}` (tasa de errores). **Log:** trazas de excepciones en stdout del contenedor. |
 | **Señal para latencia** | **Métrica:** `http_server_requests_seconds_*` (duración de requests; percentiles p95/p99 si se habilita el histograma). |
 | **Disponibilidad** | Endpoint de salud `/actuator/health` (usable como healthcheck del contenedor o probe externo). |
-| **Alerta** | Se dispara si [COMPLETAR: ej. tasa de 5xx > 5% durante 5 min, o p95 > 1 s durante 5 min] |
-| **Canal de notificación** | [COMPLETAR: email / Slack / Discord / Telegram] |
+| **Alerta** | Se dispara si  tasa de 5xx > 5% durante 5 min, o p95 > 1 s durante 5 min |
+| **Canal de notificación** | email |
 
-Ejemplo de regla de alerta (Prometheus):
-
-```yaml
-# Ejemplo referencial
-groups:
-  - name: api-alerts
-    rules:
-      - alert: AltaTasaErrores5xx
-        expr: sum(rate(http_requests_total{status=~"5.."}[5m]))
-              / sum(rate(http_requests_total[5m])) > 0.05
-        for: 5m
-        labels:
-          severity: critical
-        annotations:
-          summary: "Más del 5% de respuestas 5xx en los últimos 5 minutos"
-```
-
-> **📷 Imagen sugerida:** dashboard de Grafana (o la herramienta usada) mostrando tasa de errores y latencia, y la alerta recibida.
->
-> `![Dashboard de monitoreo](img/monitoreo.png)`
+![Dashboard de monitoreo](img/dashboard-grafana.png)
 
 ### 3.3 Tercera Forma: Aprendizaje y Simulación de Fallos
 
 #### Experimento de falla controlada
 
-**Escenario:** [COMPLETAR: elegir uno]
+**Escenario:** 
 
-- *Opción A:* se modificó un test unitario (o el código) para que fallara intencionalmente.
-- *Opción B:* se eliminó una variable de entorno obligatoria (ej. `DATABASE_URL`).
-- *Opción C:* se introdujo un error que devuelve HTTP 500 en un endpoint.
+- Se modificó un test unitario (o el código) para que fallara intencionalmente.
 
-**Hipótesis:** [COMPLETAR: ej. "el pipeline debería detener el flujo en la etapa de tests y bloquear el merge"].
+**Hipótesis:** el pipeline debería detener el flujo en la etapa de tests y bloquear el merge.
 
 **Procedimiento:**
 
-1. [COMPLETAR: ej. Se creó la rama `experiment/fallo-controlado`.]
-2. [COMPLETAR: ej. Se rompió el endpoint `/items` para que lance una excepción.]
-3. [COMPLETAR: ej. Se hizo push y se abrió un Pull Request hacia `main`.]
+1. Se creó la rama `feature/test-fail`.
+2. Se rompió uno de los test a proposito
+![Cambios en test](img/cambios-test.png)
+
+3. Se hizo push y se abrió un Pull Request hacia `develop`.
+![Cambios en test](img/test_fail.png)
+
+4. Se envió la notificación a nuestros mails
+
+![Cambios en test](img/notificacion-mail.png)
 
 **Resultado observado:**
 
-| Momento | Qué ocurrió |
-|---|---|
-| T+0 | Push de la rama con el defecto |
-| T+[COMPLETAR] min | El job de [COMPLETAR: tests] falló |
-| T+[COMPLETAR] min | Se envió la notificación a [COMPLETAR] |
-| — | El PR quedó bloqueado; no se publicó ninguna imagen |
-
-> **📷 Imágenes sugeridas:** (1) log del test fallido, (2) PR bloqueado con checks en rojo, (3) notificación/alerta recibida.
->
-> `![Test fallido en CI](img/experimento-fallo.png)`
-> `![Alerta recibida](img/experimento-alerta.png)`
-
-**Aprendizaje obtenido:** [COMPLETAR: ej. se detectó el error en N minutos en lugar de en producción; se agregó un test de regresión / validación de variables de entorno al arranque para fallar rápido con un mensaje claro].
-
-**Mejoras incorporadas tras el experimento:**
-
-- [COMPLETAR: ej. validación de variables de entorno al iniciar la app]
-- [COMPLETAR: ej. nuevo test que cubre el caso]
-- [COMPLETAR: ej. ajuste del umbral de alerta]
+El PR quedó bloqueado; no sé incorporó el código a develop.
 
 ---
 
@@ -383,35 +348,6 @@ groups:
 | 1 | **Esperas** (compilación, empaquetado y despliegue manuales) | El equipo espera a que alguien construya y suba la versión | El pipeline construye, prueba y publica automáticamente en cada cambio; la caché de capas de Docker acorta los tiempos de build |
 | 2 | **Defectos detectados tarde** (bugs en producción) | Un error llega a los usuarios y su corrección es costosa | Linter y tests en CI detectan el defecto en minutos; la protección de ramas impide integrar código roto |
 | 3 | **Reprocesos y configuración manual** ("en mi máquina funciona") | Se pierde tiempo replicando entornos y corrigiendo diferencias | Contenedor idéntico en todos los entornos; infraestructura y configuración como código |
-| 4 | *(Opcional)* **Sobreproducción / código sin integrar** | Ramas largas con cambios acumulados y conflictos | Ramas de vida corta y PRs pequeños con integración frecuente |
-
-**Mejora medible:** [COMPLETAR: ej. el tiempo desde el commit hasta el despliegue pasó de ~[X] min manuales a ~[Y] min automáticos].
 
 ---
 
-## 5. Conclusiones
-
-- [COMPLETAR: beneficios principales observados al automatizar el ciclo de vida]
-- [COMPLETAR: dificultades encontradas y cómo se resolvieron]
-- [COMPLETAR: mejoras futuras, ej. despliegue continuo con rollback automático, análisis de cobertura, pruebas de carga, entornos de staging]
-
----
-
-## Anexos
-
-- **Anexo A:** `Dockerfile` completo
-- **Anexo B:** Workflow de CI completo (`.github/workflows/*.yml`)
-- **Anexo C:** Configuración de monitoreo y alertas
-- **Anexo D:** Enlaces — repositorio, registro de imágenes, aplicación desplegada, dashboards
-
----
-
-### Checklist de imágenes para el informe y la exposición
-
-- [ ] Diagrama de flujo del pipeline
-- [ ] Pipeline ejecutado con todas las etapas en verde
-- [ ] Comparación de tamaño de imagen Docker
-- [ ] Configuración de protección de ramas
-- [ ] Pipeline fallido (Andon Cord)
-- [ ] Dashboard de monitoreo / alertas
-- [ ] Evidencia del experimento de falla controlada
