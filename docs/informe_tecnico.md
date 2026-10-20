@@ -245,16 +245,18 @@ etc. Además hace más fácil definir las reglas para el workflow de github acti
 
 Configuración aplicada en **Settings → Branches → Branch protection rules**:
 
-- [x] Requerir Pull Request antes de hacer merge
-- [x] Requerir al menos 1 aprobación de revisión
-- [x] Requerir que los checks de CI pasen (lint, tests, build) antes del merge
-- [x] Requerir que la rama esté actualizada con `main`
-- [x] Bloquear push directo y force-push a `main`
+- Requerir Pull Request antes de hacer merge:
+![Ejemplo](./img/requires_pr.png)
+- Requerir al menos 1 aprobación de revisión:
+![Ejemplo](./img/requires_revision.png)
+- Requerir que los checks de CI pasen (lint, tests, build) antes del merge:
+![Ejemplo](./img/test_fail.png)
+- Bloquear push directo y force-push a `main`
 
 
-> **📷 Imagen sugerida:** captura de la configuración de protección de ramas y de un PR bloqueado por checks fallidos.
->
-> `![Reglas de protección de rama](img/branch-protection.png)`
+Configuración de protección de ramas sobre main y develop:
+
+![Reglas de protección de rama](img/branch-protection.png)
 
 ---
 
@@ -270,8 +272,6 @@ Configuración aplicada en **Settings → Branches → Branch protection rules**
 | Correr los tests a mano antes de entregar | Los tests se ejecutan automáticamente en el runner |
 | Construir la imagen Docker en la máquina del desarrollador | El build ocurre en CI con un entorno limpio |
 | Etiquetar y subir la imagen al registro manualmente | El pipeline la etiqueta (`sha` / versión) y la publica |
-| Desplegar copiando archivos o por SSH | Despliegue automático desde la imagen publicada [COMPLETAR] |
-| Verificar vulnerabilidades a ojo | Escaneo automático de la imagen [COMPLETAR si aplica] |
 
 #### ¿Cómo se asegura que el entorno sea idéntico en desarrollo y CI/CD?
 
