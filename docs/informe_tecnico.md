@@ -70,7 +70,12 @@ Se puede consultar el archivo yaml con todos los pasos [acá](../.github/workflo
 - Se usa caché de Maven (`cache: maven`) para acelerar las ejecuciones (feedback más rápido).
 
 >Pipeline ejecutado (rama main)
-![Pipeline ejecutado en CI](./img/pipeline-ejecucion.png)
+![Pipeline ejecutado en CI](./img/pipeline-ci-cd-main.png)
+
+vs.
+
+>Pipeline ejecutado (rama develop)
+![Pipeline ejecutado en CI](./img/pipeline-ci-cd-develop.png)
 
 ---
 
@@ -96,11 +101,11 @@ git push origin 1.1.0
 - El paso **Validar version** funciona como una segunda barrera (Andon Cord): si no se generó ningún tag de imagen o el nombre del tag no cumple `X.Y.Z`, el workflow falla con `exit 1` y los pasos siguientes (login, build y push) **no se ejecutan**.
 - La versión se pasa al Dockerfile mediante `APP_VERSION`, que queda registrada en la etiqueta `org.opencontainers.image.version` de la imagen, lo que da trazabilidad entre el código, el tag y el artefacto.
 - Las credenciales de Docker Hub se guardan como **secrets** (`DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`), nunca en el código.
-- `docker/setup-buildx-action` y `cache-from/cache-to: type=gha` reutilizan las capas de Docker entre ejecuciones, lo que acelera el build (feedback más rápido).
+- `docker/setup-buildx-action` y `cache-from/cache-to: type=gha` reutilizan las capas de Docker entre ejecuciones, lo que acelera el build.
 
 > Pipeline ejecutado (tag SemVer)
 
-![Pipeline ejecutado al publicar un tag](./img/pipeline-tagged.png)
+![Pipeline ejecutado al publicar un tag](./img/pipeline-ci-cd-tagged.png)
 
 **Diferencia con `ci-cd`:**
 
@@ -127,20 +132,15 @@ FROM maven:${TAG_VERSION_BUILD} AS build
 
 WORKDIR /app
 
-# Primero se copia el pom con las dependencias, para que Docker reutilice esta capa
-# "cacheada", ya que las dependencias no cambian muy seguido
 COPY pom.xml .
 
-# Descarga de dependencias
+
 RUN mvn dependency:go-offline
 
-# Después se copia el código, que es lo que más cambia
 COPY src ./src
 
-# Compila y genera el jar
 RUN mvn clean package -DskipTests
 
-# STAGE 2 - PRD
 FROM eclipse-temurin:${TAG_VERSION} AS prd
 
 ARG APP_VERSION
@@ -182,45 +182,75 @@ ENTRYPOINT ["java", "-jar", "/app/app.jar"]
 | Sin optimizar (una sola etapa, imagen `maven` con JDK, sin Alpine) | [COMPLETAR: medir con `docker images`] |
 | Optimizada (Alpine + JRE + multi-stage) | [COMPLETAR: medir con `docker images`] |
 
-> Para tener el dato real: construir ambas versiones localmente (`docker build -t api:optimizada .` y una variante de una sola etapa `docker build -t api:simple -f Dockerfile.simple .`) y comparar con `docker images`.
+Para tener el dato real: construimos ambas versiones localmente `api:optimizada` y una variante de una sola etapa `api:simple` con el siguiente Dockerfile:
 
-> **📷 Imagen sugerida:** salida de `docker images` mostrando ambos tamaños, o un gráfico de barras comparativo.
->
-> `![Comparación de tamaños de imagen](img/comparacion-tamano.png)`
+```dockerfile
+ARG TAG_VERSION_BUILD=3.9-eclipse-temurin-25-alpine
+
+FROM maven:${TAG_VERSION_BUILD}
+
+ARG APP_VERSION
+ARG BUILD_DATE
+
+LABEL org.opencontainers.image.created=$BUILD_DATE \
+      org.opencontainers.image.version=$APP_VERSION \
+      maintainer="Nayesz;Lucasb" \
+      description="DevOps Project 2026 - G5"
+
+WORKDIR /app
+
+# Se crea un usuario no-root
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
+# Primero copiamos el POM para aprovechar la caché de dependencias
+COPY pom.xml .
+
+RUN mvn dependency:go-offline
+
+# Copiamos el código fuente
+COPY src ./src
+
+# Compilamos y generamos el JAR
+RUN mvn clean package -DskipTests
+
+# Ejecutamos la aplicación como usuario no-root
+USER appuser
+
+EXPOSE 8080
+
+ENTRYPOINT ["java", "-jar", "/app/target/tu-aplicacion.jar"]
+
+```
+
+Esta es la comparacion de las imagenes donde podemos ver la diferencia del peso en la imagen final:
+> ![Comparación de tamaños de imagen](./img/docker-images.png)
 
 ### 2.2 Estrategia de integración
 
-#### Modelo de branching elegido: GitFlow simplificado (`main` + `develop` + ramas de trabajo)
-
-El workflow se dispara con PRs hacia `main` y `develop`, lo que refleja este modelo. [COMPLETAR: confirmar con el equipo y ajustar si usan release/hotfix].
+#### Modelo de branching elegido: GitFlow (`main` + `develop` + ramas de trabajo)
 
 **Reglas adoptadas:**
 
-- `main`: rama estable; solo desde ella se publica la imagen en Docker Hub.
+- `main`: rama estable; desde ella se publica una imagen en Docker Hub tagueada con el hash del commit.
 - `develop`: rama de integración donde se juntan las funcionalidades.
 - Ramas de trabajo: `feature/*`, `fix/*` de vida corta, que parten de `develop`.
 - Todo cambio entra a `develop` o `main` mediante Pull Request.
-- Convención de commits: [COMPLETAR: ej. Conventional Commits].
-- Estrategia de merge: [COMPLETAR: squash / merge commit / rebase].
-**Justificación:** [COMPLETAR: ej. Trunk-Based reduce conflictos de integración, favorece la integración continua real y acorta el tiempo entre commit y producción, algo adecuado para un equipo pequeño].
-
-| Criterio | Trunk-Based | GitFlow |
-|---|---|---|
-| Complejidad | Baja | Alta (develop, release, hotfix) |
-| Frecuencia de integración | Alta | Media/Baja |
-| Adecuado para CD | Sí | Requiere más ceremonia |
-| Equipo pequeño | Muy adecuado | Excesivo |
+- Convención de commits: Conventional Commits.
+- Estrategia de merge:  merge commit, mantenemos todos los commits del PR y se agrega un commit de merge.
+**Justificación:** Elegimos GitFlow en primer lugar porque es lo conocido. Además, creemos que GitFlow tiene más armonia con el código en sus distintas etapas,
+'lo estable' -> main, 'lo que se integro de distintas ramas de trabajo y esta estable pero todavía no fue a prd' -> develop , multiples ramas según de que se trate feature/, fix/,
+etc. Además hace más fácil definir las reglas para el workflow de github actions, ya que podes tener distintas acciones para c/u.
 
 #### Protección de ramas (`main`)
 
 Configuración aplicada en **Settings → Branches → Branch protection rules**:
 
 - [x] Requerir Pull Request antes de hacer merge
-- [x] Requerir al menos [COMPLETAR: 1] aprobación de revisión
+- [x] Requerir al menos 1 aprobación de revisión
 - [x] Requerir que los checks de CI pasen (lint, tests, build) antes del merge
 - [x] Requerir que la rama esté actualizada con `main`
 - [x] Bloquear push directo y force-push a `main`
-- [ ] [COMPLETAR: otras reglas, ej. historial lineal, resolver conversaciones]
+
 
 > **📷 Imagen sugerida:** captura de la configuración de protección de ramas y de un PR bloqueado por checks fallidos.
 >
