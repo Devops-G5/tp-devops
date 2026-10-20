@@ -66,7 +66,7 @@ class UserCrudTests {
     void getReturnsUser() throws Exception {
         when(dataSource.get(user.getId())).thenReturn(Optional.of(user));
         mvc.perform(get("/api/users/{id}", user.getId())).andExpect(status().isOk())
-                .andExpect(jsonPath("$.username").value("lucas"));
+                .andExpect(jsonPath("$.username").value("pedro"));
     }
 
     @Test
