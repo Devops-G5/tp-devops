@@ -12,7 +12,7 @@
 2. [Justificación Técnica y Decisiones de Diseño](#2-justificación-técnica-y-decisiones-de-diseño)
 3. [Aplicación de la Filosofía DevOps](#3-aplicación-de-la-filosofía-devops)
 4. [Principios Lean (Reducción de Desperdicio)](#4-principios-lean-reducción-de-desperdicio)
-5. [Conclusiones](#5-conclusiones)
+
 
 ---
 
@@ -32,14 +32,13 @@ flowchart LR
     F -->|solo rama Main o tags| G[Build de imagen Docker]
     G --> H[(Docker Hub<br/>tag = SHA del commit ó semVer del tag en github)]
     H --> I[Despliegue<br/>COMPLETAR: plataforma de hosting]
-    I --> J[Monitoreo<br/>Actuator + Prometheus]
-
+  I --> J[Monitoreo<br/>Grafana Alloy + Grafana Cloud<br/>Prometheus + Loki]
+  J --> K[Alertas<br/>notificación por correo]
     D -. falla .-> X[Pipeline cortado<br/>notificación al equipo]
     E -. falla .-> X
     F -. falla .-> X
     G -. falla .-> X
 ```
-# TODO: ver si haecemos cd
 
 ### 1.2 Componentes del flujo
 
@@ -53,8 +52,10 @@ flowchart LR
 | Construcción de imagen | Docker + `docker/build-push-action` | Genera la imagen del contenedor |
 | Registro de imágenes | Docker Hub | Almacena y versiona los artefactos (tag = SHA del commit ó semVer del tag en github) |
 | Hosting / Despliegue | [COMPLETAR: Render / Railway / Fly.io / VPS / otro] | Ejecuta la aplicación en producción |
-| Monitoreo | Spring Boot Actuator + Micrometer (Prometheus) + Grafana  | Expone métricas y salud de la API |
-
+| Métricas | Spring Boot Actuator + Micrometer (Prometheus) | Expone métricas y salud de la API en `/actuator/prometheus` y `/actuator/health` |
+| Recolección | Grafana Alloy | Recolecta las métricas y los logs JSON de la API y los envía a Grafana Cloud |
+| Monitoreo | Grafana Cloud (Prometheus + Loki + Grafana) | Almacena métricas y logs, y los muestra en dashboards |
+| Alertas | Grafana Alerting (contact point por correo electrónico) | Avisa al equipo cuando aumentan los errores 5xx o la latencia P95 |
 
 ### 1.3 El workflow 'ci-cd'
 
@@ -179,8 +180,8 @@ ENTRYPOINT ["java", "-jar", "/app/app.jar"]
 
 | Versión del Dockerfile | Tamaño de la imagen |
 |---|---|
-| Sin optimizar (una sola etapa, imagen `maven` con JDK, sin Alpine) | [COMPLETAR: medir con `docker images`] |
-| Optimizada (Alpine + JRE + multi-stage) | [COMPLETAR: medir con `docker images`] |
+| Sin optimizar (una sola etapa, imagen `maven` con JDK, sin Alpine) |  287MB|
+| Optimizada (Alpine + JRE + multi-stage) | 111MB |
 
 Para tener el dato real: construimos ambas versiones localmente `api:optimizada` y una variante de una sola etapa `api:simple` con el siguiente Dockerfile:
 
@@ -218,7 +219,7 @@ USER appuser
 
 EXPOSE 8080
 
-ENTRYPOINT ["java", "-jar", "/app/target/tu-aplicacion.jar"]
+ENTRYPOINT ["java", "-jar", "/app/target/devops-0.0.1-SNAPSHOT.jar"]
 
 ```
 
@@ -237,13 +238,14 @@ Esta es la comparacion de las imagenes donde podemos ver la diferencia del peso 
 - Todo cambio entra a `develop` o `main` mediante Pull Request.
 - Convención de commits: Conventional Commits.
 - Estrategia de merge:  merge commit, mantenemos todos los commits del PR y se agrega un commit de merge.
+
 **Justificación:** Elegimos GitFlow en primer lugar porque es lo conocido. Además, creemos que GitFlow tiene más armonia con el código en sus distintas etapas,
 'lo estable' -> main, 'lo que se integro de distintas ramas de trabajo y esta estable pero todavía no fue a prd' -> develop , multiples ramas según de que se trate feature/, fix/,
 etc. Además hace más fácil definir las reglas para el workflow de github actions, ya que podes tener distintas acciones para c/u.
 
 #### Protección de ramas (`main`)
 
-Configuración aplicada en **Settings → Branches → Branch protection rules**:
+Configuración aplicada en **Settings → Rules → Rulesets**:
 
 - Requerir Pull Request antes de hacer merge:
 ![Ejemplo](./img/requires_pr.png)
@@ -295,26 +297,60 @@ Configuración de protección de ramas sobre main y develop:
 | **Build de imagen Docker** | Error de construcción | No se publica el artefacto |
 | **Protección de rama** | Checks requeridos en rojo | GitHub impide el merge a `main` |
 
-**Principio:** un artefacto defectuoso nunca llega al registro ni a producción. El equipo recibe la notificación por email y la prioridad es **arreglar el pipeline antes de seguir produciendo código nuevo**.
+**Principio:** un artefacto defectuoso nunca llega al registro ni a producción. El equipo recibe la notificación por email y la prioridad es **arreglar el pipeline antes de seguir con código nuevo**.
 
 ![Pipeline detenido por fallo](./img/test_fail.png)
 
 #### Visibilidad de fallos: errores HTTP 5xx y latencia alta
 
+La observabilidad se resuelve con **Grafana Cloud**, alimentado por **Grafana Alloy**, un agente que corre junto a la API:
+
+- **Métricas:** Alloy consulta `/actuator/prometheus` cada 15 segundos y las envía a Prometheus (Grafana Cloud).
+- **Logs:** Alloy lee los logs JSON del contenedor y los envía a Loki, etiquetados por nivel (`level`).
+
 | Aspecto | Detalle |
 |---|---|
-| **Herramienta de monitoreo** | Spring Boot Actuator + Micrometer, con métricas en formato Prometheus + Grafana |
-| **Señal para 5xx** | **Métrica:** `http_server_requests_seconds_count{status=~"5.."}` (tasa de errores). **Log:** trazas de excepciones en stdout del contenedor. |
-| **Señal para latencia** | **Métrica:** `http_server_requests_seconds_*` (duración de requests; percentiles p95/p99 si se habilita el histograma). |
-| **Disponibilidad** | Endpoint de salud `/actuator/health` (usable como healthcheck del contenedor o probe externo). |
-| **Alerta** | Se dispara si  tasa de 5xx > 5% durante 5 min, o p95 > 1 s durante 5 min |
-| **Canal de notificación** | email |
+| **Herramienta de monitoreo** | Grafana Cloud (Prometheus + Loki), con Grafana Alloy como recolector |
+| **Señal para 5xx** | **Métrica:** panel de errores 5xx (`http_server_requests_seconds_count{status=~"5.."}`). **Log:** entradas con `level=ERROR` en Loki. |
+| **Señal para latencia** | **Métrica:** paneles P50 y P95 de `http_server_requests_seconds`. |
+| **Disponibilidad** | Endpoint de salud `/actuator/health`. |
+| **Canal de notificación** | Correo electrónico, mediante un *contact point* de Grafana Alerting |
+
+**Reglas de alerta** (se evalúan cada 1 minuto):
+
+| Alerta | Consulta (PromQL) | Condición |
+|---|---|---|
+| **Errores 5xx** | `sum(increase(http_server_requests_seconds_count{job="devops-api", uri=~"/api/.*", status=~"5.."}[5m]))` | Más de 5 errores en 5 minutos |
+| **Latencia P95** | `histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{job="devops-api", uri=~"/api/.*"}[5m])))` | P95 mayor a 1 seg |
 
 ![Dashboard de monitoreo](img/dashboard-grafana.png)
 
+Reglas en Grafana:
+
+![Reglas de alerta en Grafana](img/alerta-regla.png)
+
 ### 3.3 Tercera Forma: Aprendizaje y Simulación de Fallos
 
-#### Experimento de falla controlada
+#### Experimento de falla controlada: errores 5xx
+
+**Escenario:** se generaron errores HTTP 5xx en la API (Se bajó el servicio 'mongodb') hasta superar el umbral de la regla `API - Errores 5xx`.
+
+**Hipótesis:** al superar los 5 errores en una ventana de 5 minutos, Grafana disparará la alerta y enviará un correo al equipo, sin intervención manual.
+
+**Resultado observado:**
+
+El panel *Errores HTTP 5XX* mostró el aumento y la regla pasó a estado *Firing*. Llegó un correo de alerta con ~15,7 errores medidos, frente a un umbral de 5.
+
+![Panel de errores 5xx](img/experimento-5xx.png)
+
+![Correo de alerta recibido](img/experimento-mail-firing.png)
+
+Una vez que se estabilizó esa alerta, Grafana la marcó como resuelta y también notificó:
+
+![Correo de alerta recibido](img/experimento-mail-resolved.png)
+
+
+#### Experimentos de falla controlada: Fallan los tests
 
 **Escenario:** 
 
@@ -345,8 +381,8 @@ El PR quedó bloqueado; no sé incorporó el código a develop.
 
 | # | Desperdicio común | Cómo se manifiesta | Cómo lo evita la solución implementada |
 |---|---|---|---|
-| 1 | **Esperas** (compilación, empaquetado y despliegue manuales) | El equipo espera a que alguien construya y suba la versión | El pipeline construye, prueba y publica automáticamente en cada cambio; la caché de capas de Docker acorta los tiempos de build |
-| 2 | **Defectos detectados tarde** (bugs en producción) | Un error llega a los usuarios y su corrección es costosa | Linter y tests en CI detectan el defecto en minutos; la protección de ramas impide integrar código roto |
+| 1 | **Esperas** (compilación, empaquetado y despliegue manuales) | El equipo tiene que esperar a que alguien construya y suba la versión | El pipeline construye, prueba y publica automáticamente en cada cambio; |
+| 2 | **Defectos detectados tarde** (bugs en producción) | Un error llega a los usuarios y su corrección es costosa | Linter y tests en CI detectan el error en minutos; la protección de ramas impide integrar código roto |
 | 3 | **Reprocesos y configuración manual** ("en mi máquina funciona") | Se pierde tiempo replicando entornos y corrigiendo diferencias | Contenedor idéntico en todos los entornos; infraestructura y configuración como código |
 
 ---
