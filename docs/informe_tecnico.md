@@ -12,7 +12,7 @@
 2. [Justificación Técnica y Decisiones de Diseño](#2-justificación-técnica-y-decisiones-de-diseño)
 3. [Aplicación de la Filosofía DevOps](#3-aplicación-de-la-filosofía-devops)
 4. [Principios Lean (Reducción de Desperdicio)](#4-principios-lean-reducción-de-desperdicio)
-
+5. [Conclusiones](#5-conclusiones)
 
 ---
 
@@ -31,9 +31,9 @@ flowchart LR
     E --> F[Tests<br/>JUnit · mvnw verify]
     F -->|solo rama Main o tags| G[Build de imagen Docker]
     G --> H[(Docker Hub<br/>tag = SHA del commit ó semVer del tag en github)]
-    H --> I[Despliegue<br/>COMPLETAR: plataforma de hosting]
-  I --> J[Monitoreo<br/>Grafana Alloy + Grafana Cloud<br/>Prometheus + Loki]
-  J --> K[Alertas<br/>notificación por correo]
+    H --> I[Ejecución de la imagen<br/>Docker Compose]
+    I --> J[Monitoreo<br/>Grafana Alloy + Grafana Cloud<br/>Prometheus + Loki]
+    J --> K[Alertas<br/>notificación por correo]
     D -. falla .-> X[Pipeline cortado<br/>notificación al equipo]
     E -. falla .-> X
     F -. falla .-> X
@@ -51,7 +51,7 @@ flowchart LR
 | Runner de CI | GitHub Actions (`ubuntu-latest`) | Ejecuta las etapas del pipeline en un entorno efímero |
 | Construcción de imagen | Docker + `docker/build-push-action` | Genera la imagen del contenedor |
 | Registro de imágenes | Docker Hub | Almacena y versiona los artefactos (tag = SHA del commit ó semVer del tag en github) |
-| Hosting / Despliegue | [COMPLETAR: Render / Railway / Fly.io / VPS / otro] | Ejecuta la aplicación en producción |
+| Ejecución | Docker Compose | Levanta la imagen construida en Docker junto con sus servicios (MongoDB) y Grafana Alloy |
 | Métricas | Spring Boot Actuator + Micrometer (Prometheus) | Expone métricas y salud de la API en `/actuator/prometheus` y `/actuator/health` |
 | Recolección | Grafana Alloy | Recolecta las métricas y los logs JSON de la API y los envía a Grafana Cloud |
 | Monitoreo | Grafana Cloud (Prometheus + Loki + Grafana) | Almacena métricas y logs, y los muestra en dashboards |
@@ -59,7 +59,7 @@ flowchart LR
 
 ### 1.3 El workflow 'ci-cd'
 
-Se puede consultar el archivo yaml con todos los pasos [acá](../.github/workflows/ci-cd.yaml)
+Se puede consultar el archivo yaml con todos los pasos [acá](https://github.com/Devops-G5/tp-devops/blob/develop/.github/workflows/ci-cd.yaml)
 
 **Puntos clave del workflow:**
 
@@ -84,7 +84,7 @@ vs.
 ### 1.4 El workflow 'tagged'
 
 
-Se puede consultar el archivo yaml con todos los pasos [acá](../.github/workflows/tagged.yaml)
+Se puede consultar el archivo yaml con todos los pasos [acá](https://github.com/Devops-G5/tp-devops/blob/develop/.github/workflows/tagged.yaml)
 
 Este workflow se encarga de **publicar versiones**: se dispara únicamente cuando se sube un tag con formato SemVer (por ejemplo `1.1.0`) y publica en Docker Hub una imagen con esa versión exacta.
 
@@ -115,6 +115,9 @@ git push origin 1.1.0
 | Disparador | push y PR a `main` / `develop` | push de un tag `X.Y.Z` |
 | Tag de la imagen | SHA del commit | Versión SemVer (`1.1.0`) |
 | Uso | Integración continua y artefacto de cada cambio en `main` | Versiones liberadas e identificables |
+
+
+> **Aclaración sobre alcance de la entrega:** el pipeline llega hasta la publicación del artefacto (imagen versionada en Docker Hub), lo que corresponde a **Entrega Continua** (*Continuous Delivery*). El despliegue automático a una plataforma de hosting (*Continuous Deployment*) es un desafío opcional que no implementamos en la entrega de este informe; el artefacto queda listo para desplegarse con un Deploy Hook como mejora futura.
 
 ---
 
@@ -308,6 +311,9 @@ La observabilidad se resuelve con **Grafana Cloud**, alimentado por **Grafana Al
 - **Métricas:** Alloy consulta `/actuator/prometheus` cada 15 segundos y las envía a Prometheus (Grafana Cloud).
 - **Logs:** Alloy lee los logs JSON del contenedor y los envía a Loki, etiquetados por nivel (`level`).
 
+![Dashboard de monitoreo](img/dashboard-grafana.png)
+
+
 | Aspecto | Detalle |
 |---|---|
 | **Herramienta de monitoreo** | Grafana Cloud (Prometheus + Loki), con Grafana Alloy como recolector |
@@ -316,6 +322,7 @@ La observabilidad se resuelve con **Grafana Cloud**, alimentado por **Grafana Al
 | **Disponibilidad** | Endpoint de salud `/actuator/health`. |
 | **Canal de notificación** | Correo electrónico, mediante un *contact point* de Grafana Alerting |
 
+
 **Reglas de alerta** (se evalúan cada 1 minuto):
 
 | Alerta | Consulta (PromQL) | Condición |
@@ -323,11 +330,16 @@ La observabilidad se resuelve con **Grafana Cloud**, alimentado por **Grafana Al
 | **Errores 5xx** | `sum(increase(http_server_requests_seconds_count{job="devops-api", uri=~"/api/.*", status=~"5.."}[5m]))` | Más de 5 errores en 5 minutos |
 | **Latencia P95** | `histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{job="devops-api", uri=~"/api/.*"}[5m])))` | P95 mayor a 1 seg |
 
-![Dashboard de monitoreo](img/dashboard-grafana.png)
-
 Reglas en Grafana:
 
 ![Reglas de alerta en Grafana](img/alerta-regla.png)
+
+
+Además de las métricas, los logs de la API llegan a Loki en formato JSON, con el nivel (`level`) como etiqueta. Esto permite filtrar los `ERROR` y los `WARN` y ubicar la causa de un fallo:
+
+![Logs de la API en Grafana (Loki)](img/logs.png)
+
+
 
 ### 3.3 Tercera Forma: Aprendizaje y Simulación de Fallos
 
@@ -350,18 +362,18 @@ Una vez que se estabilizó esa alerta, Grafana la marcó como resuelta y tambié
 ![Correo de alerta recibido](img/experimento-mail-resolved.png)
 
 
-#### Experimentos de falla controlada: Fallan los tests
+#### Experimento de falla controlada: Fallan los tests
 
 **Escenario:** 
 
-- Se modificó un test unitario (o el código) para que fallara intencionalmente.
+- Se modificó un test unitario para que fallara intencionalmente.
 
 **Hipótesis:** el pipeline debería detener el flujo en la etapa de tests y bloquear el merge.
 
 **Procedimiento:**
 
 1. Se creó la rama `feature/test-fail`.
-2. Se rompió uno de los test a proposito
+2. Se rompió uno de los test a propósito
 ![Cambios en test](img/cambios-test.png)
 
 3. Se hizo push y se abrió un Pull Request hacia `develop`.
@@ -381,9 +393,21 @@ El PR quedó bloqueado; no sé incorporó el código a develop.
 
 | # | Desperdicio común | Cómo se manifiesta | Cómo lo evita la solución implementada |
 |---|---|---|---|
-| 1 | **Esperas** (compilación, empaquetado y despliegue manuales) | El equipo tiene que esperar a que alguien construya y suba la versión | El pipeline construye, prueba y publica automáticamente en cada cambio; |
+| 1 | **Esperas** (compilación y empaquetado) | El equipo tiene que esperar a que alguien construya y suba la versión | El pipeline construye, prueba y publica automáticamente en cada cambio |
 | 2 | **Defectos detectados tarde** (bugs en producción) | Un error llega a los usuarios y su corrección es costosa | Linter y tests en CI detectan el error en minutos; la protección de ramas impide integrar código roto |
 | 3 | **Reprocesos y configuración manual** ("en mi máquina funciona") | Se pierde tiempo replicando entornos y corrigiendo diferencias | Contenedor idéntico en todos los entornos; infraestructura y configuración como código |
 
 ---
 
+## 5. Conclusiones
+
+Como conclusión final, queremos remarcar que esta práctica nos permitió aplicar de punta a punta el ciclo de vida de una aplicación, y no solo programarla, tal vez interviniendo en lugares donde en nuestro día a día no tenemos la oportunidad de hacerlo.
+
+**Dificultades y cómo las resolvimos**
+
+- Configurar las métricas y el monitoreo fue un gran desafio porque ninguno de nosotros contaba con experiencia en la configuración.
+
+**Alcance y mejoras futuras**
+
+- El pipeline llega hasta la publicación del artefacto (Entrega Continua). Como mejora, se puede automatizar el despliegue mediante un Deploy Hook.
+- Agregar un análisis de vulnerabilidades de la imagen.
