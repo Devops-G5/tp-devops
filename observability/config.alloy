@@ -1,8 +1,9 @@
 prometheus.scrape "devops_api" {
   targets = [
-    {"__address__" = "api:8080"},
+    {"__address__" = "tp-devops-g5-1-1-0.onrender.com:443"},
   ]
 
+  scheme          = "https"
   job_name        = "devops-api"
   metrics_path    = "/actuator/prometheus"
   scrape_interval = "15s"
@@ -21,49 +22,13 @@ prometheus.remote_write "metrics_hosted_prometheus" {
       username = "3652179"
       password = sys.env("GRAFANA_CLOUD_TOKEN")
     }
-  }
-}
-
-discovery.docker "devops_logs" {
-  host             = "unix:///var/run/docker.sock"
-  refresh_interval = "15s"
-
-  filter {
-    name   = "name"
-    values = ["devops_app"]
-  }
-}
-
-loki.source.docker "devops_api" {
-  host       = "unix:///var/run/docker.sock"
-  targets    = discovery.docker.devops_logs.targets
-  forward_to = [loki.process.devops_api.receiver]
-
-  labels = {
-    "job"         = "devops-api",
-    "application" = "devops",
-  }
-}
-
-loki.process "devops_api" {
-  forward_to = [loki.write.grafanacloud.receiver]
-
-  stage.json {
-    expressions = {"level" = "level"}
-  }
-
-  stage.labels {
-    values = {"level" = ""}
-  }
-}
-
-loki.write "grafanacloud" {
-  endpoint {
-    url = "https://logs-prod-024.grafana.net/loki/api/v1/push"
-
-    basic_auth {
-      username = "1821754"
-      password = sys.env("GRAFANA_CLOUD_LOGS_TOKEN")
+    queue_config {
+      min_shards           = 1
+      max_shards           = 4
+      max_samples_per_send = 2000
+      batch_send_deadline  = "10s"
+      retry_on_http_429    = true
     }
   }
 }
+
