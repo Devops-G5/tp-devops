@@ -15,6 +15,7 @@ Para bajar los contenedores y volumenes:
 docker compose down -v
 ```
 
+
 ### De forma local
 Requisitos: JDK 25 y Docker con Docker Compose(para levantar la base).
 
