@@ -28,6 +28,8 @@ FROM eclipse-temurin:${TAG_VERSION} AS prd
 ARG APP_VERSION
 ARG BUILD_DATE
 
+ENV APP_VERSION=${APP_VERSION}
+
 LABEL org.opencontainers.image.created=$BUILD_DATE \
       org.opencontainers.image.version=$APP_VERSION \
       maintainer="Nayesz;Lucasb" \

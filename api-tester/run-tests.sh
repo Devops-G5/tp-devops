@@ -21,15 +21,17 @@ request() {
   local body="${4:-}"
   local response_file
   local code
+  local content_type
 
   response_file="$(mktemp)"
+  RESPONSE=""
 
   local args=(
     -sS
     --connect-timeout 5
     --max-time 15
     -o "$response_file"
-    -w '%{http_code}'
+    -w $'%{http_code}\n%{content_type}'
     -X "$method"
   )
 
@@ -37,23 +39,32 @@ request() {
     args+=(-H 'Content-Type: application/json' -d "$body")
   fi
 
-  if ! code="$(curl "${args[@]}" "${BASE_URL}${path}")"; then
-    log "FAIL $method $path: error de conexión"
-    cat "$response_file" >&2 || true
+  if ! result="$(curl "${args[@]}" "${BASE_URL}${path}")"; then
+    log "FAIL $method $path: error de conexión o timeout"
     rm -f "$response_file"
     FAIL=$((FAIL + 1))
     return 1
   fi
 
+  code="${result%%$'\n'*}"
+  content_type="${result#*$'\n'}"
+
   if [[ "$code" == "$expected" ]]; then
     log "PASS $method $path -> HTTP $code"
     PASS=$((PASS + 1))
   else
-    log "FAIL $method $path -> esperado $expected, recibido $code"
-    cat "$response_file"
-    printf '\n'
-    FAIL=$((FAIL + 1))
+    log "FAIL $method $path -> esperado $expected, recibido HTTP $code"
+
+    # Mostrar solo respuestas JSON; evitar imprimir páginas HTML de Render.
+    if [[ "$content_type" == *"application/json"* ]]; then
+      cat "$response_file"
+      printf '\n'
+    elif [[ "$content_type" == *"text/html"* ]]; then
+      log "Respuesta HTML recibida (probablemente una página de error del servidor)"
+    fi
+
     rm -f "$response_file"
+    FAIL=$((FAIL + 1))
     return 1
   fi
 
