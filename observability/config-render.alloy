@@ -1,14 +1,36 @@
 prometheus.scrape "devops_api" {
   targets = [
-    {"__address__" = "https://tp-devops-g5-1-1-0.onrender.com"},
+    {"__address__" = "tp-devops-g5-1-1-0.onrender.com:443"},
   ]
 
-  scheme         = "https"
-  job_name       = "devops-api"
-  metrics_path   = "/actuator/prometheus"
-  scrape_interval = "30s"
+  scheme          = "https"
+  job_name        = "devops-api"
+  metrics_path    = "/actuator/prometheus"
+  scrape_interval = "15s"
 
   forward_to = [
     prometheus.remote_write.metrics_hosted_prometheus.receiver,
   ]
+}
+
+prometheus.remote_write "metrics_hosted_prometheus" {
+  endpoint {
+    name = "hosted-prometheus"
+    url  = "https://prometheus-prod-40-prod-sa-east-1.grafana.net/api/prom/push"
+
+    basic_auth {
+      username = "3652179"
+      password = sys.env("GRAFANA_CLOUD_TOKEN")
+    }
+    queue_config {
+      min_shards           = 1
+      max_shards           = 4
+      max_samples_per_send = 2000
+      batch_send_deadline  = "10s"
+      retry_on_http_429    = true
+
+
+
+    }
+  }
 }
